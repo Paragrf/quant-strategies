@@ -102,6 +102,19 @@ CREATE TABLE IF NOT EXISTS ma_reversal_results (
     vol_narrow_ratio  REAL    NOT NULL DEFAULT 0,
     UNIQUE (scan_date, code)
 );
+-- 均线趋势回踩策略扫描结果
+CREATE TABLE IF NOT EXISTS ma_trend_pullback_results (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_date      TEXT    NOT NULL,
+    code           TEXT    NOT NULL,
+    name           TEXT    NOT NULL DEFAULT '',
+    signal_score   REAL    NOT NULL,
+    triggered_ma   TEXT    NOT NULL DEFAULT '',
+    slope_pct      REAL    NOT NULL DEFAULT 0,
+    cross_count    INTEGER NOT NULL DEFAULT 0,
+    proximity_pct  REAL    NOT NULL DEFAULT 0,
+    UNIQUE (scan_date, code)
+);
 """
 
 import json
@@ -334,6 +347,29 @@ class StockCache:
                 ],
             )
         return len(hits)
+
+    def save_ma_trend_pullback_results(self, signals: List[Dict], scan_date: str) -> int:
+        """保存均线趋势回踩扫描结果，同一天同一股票重复扫描则覆盖。返回写入行数。"""
+        with self._conn() as conn:
+            conn.executemany(
+                '''INSERT OR REPLACE INTO ma_trend_pullback_results
+                   (scan_date, code, name, signal_score, triggered_ma,
+                    slope_pct, cross_count, proximity_pct)
+                   VALUES (?,?,?,?,?,?,?,?)''',
+                [
+                    (
+                        scan_date,
+                        s['code'], s.get('name', ''),
+                        s['signal_score'],
+                        s.get('triggered_ma', ''),
+                        s.get('slope_pct', 0),
+                        s.get('cross_count', 0),
+                        s.get('proximity_pct', 0),
+                    )
+                    for s in signals
+                ],
+            )
+        return len(signals)
 
     def save_ma_reversal_results(self, signals: List[Dict], scan_date: str) -> int:
         """保存均线反转扫描结果，同一天同一股票重复扫描则覆盖。返回写入行数。"""
