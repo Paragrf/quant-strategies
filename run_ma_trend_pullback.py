@@ -75,7 +75,7 @@ if signals:
             ]
     else:
         COL = [8, 12, 16, 7, 10, 8, 8, 8]
-        HDR = ['代码', '名称', '触发均线', '得分', '均线斜率', '偏差%', '反弹%', '量比']
+        HDR = ['代码', '名称', '触发均线', '得分', '均线斜率', '偏差%', '3日反弹%', '量比']
         ALN = ['l',   'l',   'l',       'r',   'r',      'r',   'r',   'r']
 
         def _row(sig):
@@ -84,7 +84,7 @@ if signals:
                 f"{sig['signal_score']:.1f}",
                 f"{sig['slope_pct']:.4f}%",
                 f"{sig['proximity_pct']:.1f}%",
-                f"{sig['momentum_pct']:.1f}%",
+                f"{sig['rebound_pct']:.1f}%",
                 f"{sig['vol_ratio']:.2f}x",
             ]
 

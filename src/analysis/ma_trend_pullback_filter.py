@@ -33,13 +33,14 @@ class MATrendPullbackFilter:
 
     mode='reversal' — 深度回踩反转买点：
       额外要求回踩幅度在 [pullback_min, pullback_max] 区间内、
-      价格已掉头向上、成交量开始放大。
+      近期底部刚刚形成（过去15日最低点出现在最近 bottom_confirm_days 日内）、
+      最近3日净涨幅 > 0、成交量开始放大。
       评分（满分 105）：
-        slope_score         = min(slope_pct / 0.002, 1.0) × 30
+        slope_score          = min(slope_pct / 0.002, 1.0) × 30
         pullback_depth_score = 帐篷函数，中点 (pullback_min+pullback_max)/2 得满分 × 25
-        momentum_score      = min(近 momentum_days 日涨幅 / 5%, 1.0) × 25
-        vol_expand_score    = min((vol_ratio - 1) / 1.0, 1.0) × 20
-        dual_ma_bonus       = +5
+        rebound_score        = min(近3日涨幅 / 3%, 1.0) × 25
+        vol_expand_score     = min((vol_ratio - 1) / 1.0, 1.0) × 20
+        dual_ma_bonus        = +5
     """
 
     _REF_SLOPE = 0.002       # 标准化斜率参照值（对应 slope_score 满分）
@@ -59,7 +60,7 @@ class MATrendPullbackFilter:
         mode: str = 'proximity',
         pullback_min: float = 0.05,
         pullback_max: float = 0.15,
-        momentum_days: int = 5,
+        bottom_confirm_days: int = 5,
         vol_expand_ratio: float = 0.8,
     ) -> None:
         if mode not in ('proximity', 'reversal'):
@@ -73,7 +74,7 @@ class MATrendPullbackFilter:
         self.mode = mode
         self.pullback_min = pullback_min
         self.pullback_max = pullback_max
-        self.momentum_days = momentum_days
+        self.bottom_confirm_days = bottom_confirm_days
         self.vol_expand_ratio = vol_expand_ratio
 
     def scan_stocks_sync(
@@ -253,8 +254,9 @@ class MATrendPullbackFilter:
         """
         mode='reversal' 额外条件 + 评分：
           Step 5 — 回踩幅度在 [pullback_min, pullback_max] 区间
-          Step 6 — 价格已掉头向上（近 momentum_days 日涨幅 > 0）
-          Step 7 — 成交量开始放大（近 5 日均量 / 近 20 日均量 >= vol_expand_ratio）
+          Step 6 — 近期底部刚刚形成：过去15日最低点出现在最近 bottom_confirm_days 日内
+          Step 7 — 最近3日净涨幅 > 0（刚开始反弹，不是已经涨了很久）
+          Step 8 — 成交量开始放大（近5日均量 / 近20日均量 >= vol_expand_ratio）
         """
         prox_abs = abs(proximity)
 
@@ -262,17 +264,24 @@ class MATrendPullbackFilter:
         if not (self.pullback_min <= prox_abs <= self.pullback_max):
             return None
 
-        # Step 6: 价格掉头向上
-        if n <= self.momentum_days:
+        # Step 6: 近期底部确认 — 过去15日最低点在最近 bottom_confirm_days 日内
+        lookback = min(15, n)
+        recent = min(self.bottom_confirm_days, n)
+        bottom_idx = int(np.argmin(closes[-lookback:]))  # 相对于 closes[-lookback:] 的索引
+        if bottom_idx < lookback - recent:
+            return None  # 最低点不在最近几天，底部形成已久
+
+        # Step 7: 最近3日净涨幅 > 0（短期刚启动）
+        if n < 4:
             return None
-        ref_close = closes[-(self.momentum_days + 1)]
+        ref_close = closes[-4]
         if ref_close == 0:
             return None
-        momentum = closes[-1] / ref_close - 1
-        if momentum <= 0:
+        rebound = closes[-1] / ref_close - 1
+        if rebound <= 0:
             return None
 
-        # Step 7: 量能扩张
+        # Step 8: 量能扩张
         if n < 20:
             return None
         vol_recent = float(np.mean(volumes[-5:]))
@@ -291,9 +300,9 @@ class MATrendPullbackFilter:
         half_width = (self.pullback_max - self.pullback_min) / 2.0
         pullback_depth_score = max(0.0, 1.0 - abs(prox_abs - midpoint) / half_width) * 25.0
 
-        momentum_score = min(momentum / self._REF_MOMENTUM, 1.0) * 25.0
+        rebound_score = min(rebound / 0.03, 1.0) * 25.0  # 3% 涨幅对应满分
         vol_expand_score = min((vol_ratio - 1.0) / self._REF_VOL_DELTA, 1.0) * 20.0
-        signal_score = slope_score + pullback_depth_score + momentum_score + vol_expand_score + dual_ma_bonus
+        signal_score = slope_score + pullback_depth_score + rebound_score + vol_expand_score + dual_ma_bonus
 
         return {
             'signal_score': round(signal_score, 2),
@@ -301,6 +310,6 @@ class MATrendPullbackFilter:
             'slope_pct': round(slope_pct * 100, 4),
             'cross_count': cross_count,
             'proximity_pct': round(proximity * 100, 2),
-            'momentum_pct': round(momentum * 100, 2),
+            'rebound_pct': round(rebound * 100, 2),
             'vol_ratio': round(vol_ratio, 3),
         }
