@@ -42,7 +42,9 @@ class LHBFetcher:
         result = {}
         for code, group in df.groupby('代码'):
             code = str(code).zfill(6)
+            name = str(group['名称'].iloc[0]) if '名称' in group.columns else ''
             result[code] = {
+                'name':          name,
                 'net_buy_total': float(group['龙虎榜净买额'].sum()),
                 'appear_count':  int(group['上榜日'].nunique()),
                 'reasons':       list(group['上榜原因'].unique()),

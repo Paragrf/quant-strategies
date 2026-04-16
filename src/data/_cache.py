@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS industry_map (
 -- 龙虎榜聚合数据（当日有效）
 CREATE TABLE IF NOT EXISTS lhb_cache (
     code          TEXT PRIMARY KEY,
+    name          TEXT    NOT NULL DEFAULT '',
     net_buy_total REAL    NOT NULL,
     appear_count  INTEGER NOT NULL,
     reasons       TEXT    NOT NULL,  -- JSON 数组
@@ -268,13 +269,14 @@ class StockCache:
         return bool(row and row['cache_date'] == today)
 
     def get_lhb(self) -> Dict[str, Dict]:
-        """返回 {code: {net_buy_total, appear_count, reasons}}，不检查新鲜度。"""
+        """返回 {code: {name, net_buy_total, appear_count, reasons}}，不检查新鲜度。"""
         with self._conn() as conn:
             rows = conn.execute(
-                'SELECT code, net_buy_total, appear_count, reasons FROM lhb_cache'
+                'SELECT code, name, net_buy_total, appear_count, reasons FROM lhb_cache'
             ).fetchall()
         return {
             r['code']: {
+                'name':          r['name'],
                 'net_buy_total': r['net_buy_total'],
                 'appear_count':  r['appear_count'],
                 'reasons':       json.loads(r['reasons']),
@@ -287,10 +289,10 @@ class StockCache:
         with self._conn() as conn:
             conn.execute('DELETE FROM lhb_cache')
             conn.executemany(
-                '''INSERT INTO lhb_cache (code, net_buy_total, appear_count, reasons, cache_date)
-                   VALUES (?, ?, ?, ?, ?)''',
+                '''INSERT INTO lhb_cache (code, name, net_buy_total, appear_count, reasons, cache_date)
+                   VALUES (?, ?, ?, ?, ?, ?)''',
                 [
-                    (code, v['net_buy_total'], v['appear_count'],
+                    (code, v.get('name', ''), v['net_buy_total'], v['appear_count'],
                      json.dumps(v['reasons'], ensure_ascii=False), today)
                     for code, v in data.items()
                 ],
