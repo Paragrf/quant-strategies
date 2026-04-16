@@ -14,26 +14,39 @@ logger = logging.getLogger(__name__)
 
 class MATrendPullbackFilter:
     """
-    均线趋势回踩扫描器。
+    均线趋势回踩扫描器，支持两种模式。
 
-    筛选逻辑（顺序执行，任一步不通则跳过）：
+    公共筛选逻辑（两种模式均执行）：
       1. 过滤 ST/*ST 股票
       2. MA120 或 MA250 处于持续上升趋势
          （取最近 slope_window 日的均线序列做线性回归，标准化斜率 > min_slope_pct）
       3. 近 cross_window 日内，股价上穿/下穿该均线的次数 >= min_cross_count
-         （说明价格在均线附近反复震荡）
-      4. 当前收盘价 < 均线（回踩至均线下方）
+      4. 当前收盘价 < 均线
 
-    评分公式（满分 100，双均线同时触发额外 +5）：
-      slope_score     = min(slope_pct / ref_slope, 1.0) × 40   # 均线上涨坡度
-      cross_score     = min(cross_count / ref_cross, 1.0) × 40  # 穿越活跃度
-      proximity_score = (1 - |偏差| / proximity_cap) × 20       # 接近均线程度
-      dual_ma_bonus   = +5（同时触及 MA120 和 MA250）
+    mode='proximity'（默认）— 贴近均线买点：
+      奖励刚刚跌破均线、回踩浅的情形。
+      评分（满分 105）：
+        slope_score     = min(slope_pct / 0.002, 1.0) × 40
+        cross_score     = min(cross_count / 6, 1.0) × 40
+        proximity_score = (1 - |偏差| / 10%) × 20
+        dual_ma_bonus   = +5
+
+    mode='reversal' — 深度回踩反转买点：
+      额外要求回踩幅度在 [pullback_min, pullback_max] 区间内、
+      价格已掉头向上、成交量开始放大。
+      评分（满分 105）：
+        slope_score         = min(slope_pct / 0.002, 1.0) × 30
+        pullback_depth_score = 帐篷函数，中点 (pullback_min+pullback_max)/2 得满分 × 25
+        momentum_score      = min(近 momentum_days 日涨幅 / 5%, 1.0) × 25
+        vol_expand_score    = min((vol_ratio - 1) / 1.0, 1.0) × 20
+        dual_ma_bonus       = +5
     """
 
     _REF_SLOPE = 0.002       # 标准化斜率参照值（对应 slope_score 满分）
     _REF_CROSS = 6           # 穿越次数参照值（对应 cross_score 满分）
-    _PROXIMITY_CAP = 0.10    # 偏差超过此值 proximity_score 归零
+    _PROXIMITY_CAP = 0.10    # proximity 模式：偏差超过此值得 0 分
+    _REF_MOMENTUM = 0.05     # reversal 模式：5% 涨幅对应 momentum_score 满分
+    _REF_VOL_DELTA = 1.0     # reversal 模式：量能扩张比例超过 1（即翻倍）得满分
 
     def __init__(
         self,
@@ -43,13 +56,25 @@ class MATrendPullbackFilter:
         cross_window: int = 60,
         min_cross_count: int = 2,
         hist_days: int = 400,
+        mode: str = 'proximity',
+        pullback_min: float = 0.05,
+        pullback_max: float = 0.15,
+        momentum_days: int = 5,
+        vol_expand_ratio: float = 0.8,
     ) -> None:
+        if mode not in ('proximity', 'reversal'):
+            raise ValueError(f"mode 必须为 'proximity' 或 'reversal'，got {mode!r}")
         self.ma_windows = ma_windows or [120, 250]
         self.slope_window = slope_window
         self.min_slope_pct = min_slope_pct
         self.cross_window = cross_window
         self.min_cross_count = min_cross_count
         self.hist_days = hist_days
+        self.mode = mode
+        self.pullback_min = pullback_min
+        self.pullback_max = pullback_max
+        self.momentum_days = momentum_days
+        self.vol_expand_ratio = vol_expand_ratio
 
     def scan_stocks_sync(
         self,
@@ -108,10 +133,11 @@ class MATrendPullbackFilter:
 
     def _analyze_stock(self, hist: pd.DataFrame) -> Optional[Dict]:
         """
-        执行步骤2-4过滤并计算评分。
+        执行公共步骤（2-4）过滤，再按 mode 做额外条件检查和评分。
         返回结果字典（不含 code/name），或 None。
         """
         closes = hist['close'].astype(float).values
+        volumes = hist['volume'].astype(float).values
         n = len(closes)
 
         if n < max(self.ma_windows):
@@ -174,23 +200,107 @@ class MATrendPullbackFilter:
         best = max(triggered, key=lambda t: t[1])
         best_window, best_slope_pct, best_proximity, best_cross = best
 
-        # 评分
-        slope_score = min(best_slope_pct / self._REF_SLOPE, 1.0) * 40.0
-        cross_score = min(best_cross / self._REF_CROSS, 1.0) * 40.0
-        prox_abs = abs(best_proximity)
-        proximity_score = max(0.0, (1.0 - prox_abs / self._PROXIMITY_CAP)) * 20.0
         dual_ma_bonus = 5.0 if len(triggered) >= 2 else 0.0
-        signal_score = slope_score + cross_score + proximity_score + dual_ma_bonus
+        triggered_ma = (
+            '+'.join(f'MA{w}' for w, _, _, _ in triggered)
+            if len(triggered) >= 2
+            else f'MA{best_window}'
+        )
 
-        if len(triggered) >= 2:
-            triggered_ma = '+'.join(f'MA{w}' for w, _, _, _ in triggered)
+        if self.mode == 'proximity':
+            return self._score_proximity(
+                best_slope_pct, best_proximity, best_cross, dual_ma_bonus, triggered_ma
+            )
         else:
-            triggered_ma = f'MA{best_window}'
+            return self._score_reversal(
+                closes, volumes, n,
+                best_slope_pct, best_proximity, best_cross, dual_ma_bonus, triggered_ma
+            )
+
+    def _score_proximity(
+        self,
+        slope_pct: float,
+        proximity: float,
+        cross_count: int,
+        dual_ma_bonus: float,
+        triggered_ma: str,
+    ) -> Dict:
+        """mode='proximity' 评分：奖励贴近均线、刚刚跌破的情形。"""
+        slope_score = min(slope_pct / self._REF_SLOPE, 1.0) * 40.0
+        cross_score = min(cross_count / self._REF_CROSS, 1.0) * 40.0
+        prox_abs = abs(proximity)
+        proximity_score = max(0.0, (1.0 - prox_abs / self._PROXIMITY_CAP)) * 20.0
+        signal_score = slope_score + cross_score + proximity_score + dual_ma_bonus
+        return {
+            'signal_score': round(signal_score, 2),
+            'triggered_ma': triggered_ma,
+            'slope_pct': round(slope_pct * 100, 4),
+            'cross_count': cross_count,
+            'proximity_pct': round(proximity * 100, 2),
+        }
+
+    def _score_reversal(
+        self,
+        closes: np.ndarray,
+        volumes: np.ndarray,
+        n: int,
+        slope_pct: float,
+        proximity: float,
+        cross_count: int,
+        dual_ma_bonus: float,
+        triggered_ma: str,
+    ) -> Optional[Dict]:
+        """
+        mode='reversal' 额外条件 + 评分：
+          Step 5 — 回踩幅度在 [pullback_min, pullback_max] 区间
+          Step 6 — 价格已掉头向上（近 momentum_days 日涨幅 > 0）
+          Step 7 — 成交量开始放大（近 5 日均量 / 近 20 日均量 >= vol_expand_ratio）
+        """
+        prox_abs = abs(proximity)
+
+        # Step 5: 回踩深度范围
+        if not (self.pullback_min <= prox_abs <= self.pullback_max):
+            return None
+
+        # Step 6: 价格掉头向上
+        if n <= self.momentum_days:
+            return None
+        ref_close = closes[-(self.momentum_days + 1)]
+        if ref_close == 0:
+            return None
+        momentum = closes[-1] / ref_close - 1
+        if momentum <= 0:
+            return None
+
+        # Step 7: 量能扩张
+        if n < 20:
+            return None
+        vol_recent = float(np.mean(volumes[-5:]))
+        vol_base = float(np.mean(volumes[-20:]))
+        if vol_base == 0:
+            return None
+        vol_ratio = vol_recent / vol_base
+        if vol_ratio < self.vol_expand_ratio:
+            return None
+
+        # 评分
+        slope_score = min(slope_pct / self._REF_SLOPE, 1.0) * 30.0
+
+        # 帐篷函数：中点得满分，两端得 0
+        midpoint = (self.pullback_min + self.pullback_max) / 2.0
+        half_width = (self.pullback_max - self.pullback_min) / 2.0
+        pullback_depth_score = max(0.0, 1.0 - abs(prox_abs - midpoint) / half_width) * 25.0
+
+        momentum_score = min(momentum / self._REF_MOMENTUM, 1.0) * 25.0
+        vol_expand_score = min((vol_ratio - 1.0) / self._REF_VOL_DELTA, 1.0) * 20.0
+        signal_score = slope_score + pullback_depth_score + momentum_score + vol_expand_score + dual_ma_bonus
 
         return {
             'signal_score': round(signal_score, 2),
             'triggered_ma': triggered_ma,
-            'slope_pct': round(best_slope_pct * 100, 4),
-            'cross_count': best_cross,
-            'proximity_pct': round(best_proximity * 100, 2),
+            'slope_pct': round(slope_pct * 100, 4),
+            'cross_count': cross_count,
+            'proximity_pct': round(proximity * 100, 2),
+            'momentum_pct': round(momentum * 100, 2),
+            'vol_ratio': round(vol_ratio, 3),
         }
