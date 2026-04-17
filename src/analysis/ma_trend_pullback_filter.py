@@ -116,6 +116,7 @@ class MATrendPullbackFilter:
         返回结果字典（不含 code/name），或 None。
         """
         closes = hist['close'].astype(float).values
+        volumes = hist['volume'].astype(float).values if 'volume' in hist.columns else None
         n = len(closes)
 
         if n < max(self.ma_windows):
@@ -173,6 +174,13 @@ class MATrendPullbackFilter:
             # Step 4a: 回踩深度不能超过 proximity_min
             if proximity < self.proximity_min:
                 continue
+
+            # Step 4b: 缩量回踩确认
+            if volumes is not None and len(volumes) >= 25:
+                vol_pullback = float(np.mean(volumes[-5:]))
+                vol_base = float(np.mean(volumes[-25:-5]))
+                if vol_base > 0 and vol_pullback / vol_base >= self.volume_ratio_max:
+                    continue
 
             triggered.append((window, slope_pct, proximity, sign_changes))
 
