@@ -16,7 +16,7 @@ import asyncio
 import logging
 import sys
 import time
-from typing import List
+from typing import Dict, List, Tuple
 
 import aiohttp
 import numpy as np
@@ -39,6 +39,32 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument('--proximity_min', type=float, default=-0.05,
                    help='回踩深度下限，如 -0.05 表示最多跌 5%%（默认 -0.05）')
     return p.parse_args()
+
+
+def _find_exit(
+    closes: np.ndarray,
+    t: int,
+    window: int,
+    max_hold_days: int,
+    stop_loss: float,
+) -> Tuple[float, str]:
+    """
+    从买入日 t 逐日寻找退出点。
+    优先级：收复均线（止盈）> 止损 > 到期强平。
+    返回 (sell_price, reason)，reason ∈ {'recovery', 'stop_loss', 'max_hold', 'end_of_data'}
+    """
+    buy = float(closes[t])
+    n = len(closes)
+    for k in range(1, max_hold_days + 1):
+        if t + k >= n:
+            return float(closes[-1]), 'end_of_data'
+        price = float(closes[t + k])
+        ma = float(np.mean(closes[t + k - window: t + k]))
+        if price >= ma:
+            return price, 'recovery'
+        if buy > 0 and (price - buy) / buy < stop_loss:
+            return price, 'stop_loss'
+    return float(closes[t + max_hold_days]), 'max_hold'
 
 
 def _backtest_one(hist: pd.DataFrame, f: MATrendPullbackFilter, hold_days: int) -> List[float]:
