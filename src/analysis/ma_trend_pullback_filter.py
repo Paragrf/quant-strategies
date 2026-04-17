@@ -43,6 +43,8 @@ class MATrendPullbackFilter:
         cross_window: int = 60,
         min_cross_count: int = 2,
         hist_days: int = 400,
+        proximity_min: float = -0.05,
+        volume_ratio_max: float = 0.8,
     ) -> None:
         self.ma_windows = ma_windows or [120, 250]
         self.slope_window = slope_window
@@ -50,6 +52,8 @@ class MATrendPullbackFilter:
         self.cross_window = cross_window
         self.min_cross_count = min_cross_count
         self.hist_days = hist_days
+        self.proximity_min = proximity_min
+        self.volume_ratio_max = volume_ratio_max
 
     def scan_stocks_sync(
         self,
@@ -125,14 +129,14 @@ class MATrendPullbackFilter:
             if n < window + self.slope_window:
                 continue
 
-            # 构造最近 slope_window 个 MA 值，最后一点恰好等于 current_ma
-            # i ∈ [1, slope_window]，i=slope_window 对应 closes[n-window : n]
+            # 构造最近 slope_window 个 MA 值用于斜率计算
+            # i ∈ [1, slope_window]，每个 MA 都是 window 日均线
             ma_series = np.array([
                 float(np.mean(closes[n - window - self.slope_window + i : n - window + i]))
                 for i in range(1, self.slope_window + 1)
             ])
-            # 当前 MA（最近 window 日），与 ma_series[-1] 相同
-            current_ma = ma_series[-1]
+            # 当前 MA（最近 window 日）
+            current_ma = float(np.mean(closes[-window:]))
 
             # Step 2: 均线持续上升（线性回归斜率标准化）
             x = np.arange(self.slope_window, dtype=float)
@@ -165,6 +169,11 @@ class MATrendPullbackFilter:
                 continue
 
             proximity = current / current_ma - 1  # 负值
+
+            # Step 4a: 回踩深度不能超过 proximity_min
+            if proximity < self.proximity_min:
+                continue
+
             triggered.append((window, slope_pct, proximity, sign_changes))
 
         if not triggered:
