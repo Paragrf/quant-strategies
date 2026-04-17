@@ -43,7 +43,7 @@ class MATrendPullbackFilter:
         cross_window: int = 60,
         min_cross_count: int = 2,
         hist_days: int = 400,
-        proximity_min: float = -0.05,
+        proximity_min: float = -0.03,
         volume_ratio_max: float = 0.8,
     ) -> None:
         self.ma_windows = ma_windows or [120, 250]
@@ -210,4 +210,5 @@ class MATrendPullbackFilter:
             'slope_pct': round(best_slope_pct * 100, 4),
             'cross_count': best_cross,
             'proximity_pct': round(best_proximity * 100, 2),
+            'ma_window': best_window,
         }

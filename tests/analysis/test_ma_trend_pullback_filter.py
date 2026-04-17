@@ -142,3 +142,19 @@ def test_volume_filter_skipped_when_no_volume_column():
     )
     result = f._analyze_stock(hist)
     assert result is not None  # 无 volume 列时不过滤
+
+
+def test_analyze_stock_returns_ma_window():
+    """_analyze_stock 应在结果中返回 ma_window（整数，等于触发均线的窗口大小）。"""
+    f = MATrendPullbackFilter(min_slope_pct=0.0, min_cross_count=0, proximity_min=-0.10)
+    hist = _make_uptrend_hist(pullback_pct=-0.02)
+    result = f._analyze_stock(hist)
+    assert result is not None
+    assert 'ma_window' in result
+    assert result['ma_window'] in (120, 250)
+
+
+def test_proximity_min_default_is_minus_003():
+    """proximity_min 默认值应为 -0.03。"""
+    f = MATrendPullbackFilter()
+    assert f.proximity_min == -0.03
