@@ -127,7 +127,7 @@ class MATrendPullbackFilter:
         triggered: List[Tuple[int, float, float, int]] = []  # (window, slope_pct, proximity, cross_count)
 
         for window in self.ma_windows:
-            if n < window + self.slope_window:
+            if n < window + max(self.slope_window, self.cross_window):
                 continue
 
             # 构造最近 slope_window 个 MA 值用于斜率计算
