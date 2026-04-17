@@ -58,3 +58,87 @@ def test_proximity_min_passes_shallow_pullback():
     result2 = f2._analyze_stock(hist)
     assert result2 is not None
     assert result2['proximity_pct'] > -3.0
+
+
+def test_volume_ratio_max_filters_high_volume():
+    """放量回踩（vol_ratio >= volume_ratio_max）应被过滤。"""
+    dates = pd.date_range('2023-01-01', periods=400, freq='B')
+    base = np.linspace(8.0, 12.0, 400)
+    cross_zone = np.sin(np.linspace(0, 3 * np.pi, 61)) * 0.5
+    prices = base.copy()
+    prices[-61:] = base[-61:] + cross_zone
+    ma120_approx = np.mean(prices[-120:])
+    prices[-1] = ma120_approx * 0.98   # 回踩 2%
+
+    # 放量：近 5 日 = 前 20 日均量（vol_ratio = 1.0 >= 0.8）
+    volumes = np.ones(400) * 100.0
+    volumes[-5:] = 100.0               # 不缩量
+
+    hist = pd.DataFrame({
+        'date': dates,
+        'open': prices, 'close': prices,
+        'high': prices * 1.005, 'low': prices * 0.995,
+        'volume': volumes,
+    })
+    f = MATrendPullbackFilter(
+        volume_ratio_max=0.8,
+        proximity_min=-0.10,
+        min_slope_pct=0.0,
+        min_cross_count=0,
+    )
+    assert f._analyze_stock(hist) is None
+
+
+def test_volume_ratio_max_passes_low_volume():
+    """缩量回踩（vol_ratio < volume_ratio_max）应通过成交量过滤。"""
+    dates = pd.date_range('2023-01-01', periods=400, freq='B')
+    base = np.linspace(8.0, 12.0, 400)
+    cross_zone = np.sin(np.linspace(0, 3 * np.pi, 61)) * 0.5
+    prices = base.copy()
+    prices[-61:] = base[-61:] + cross_zone
+    ma120_approx = np.mean(prices[-120:])
+    prices[-1] = ma120_approx * 0.98
+
+    volumes = np.ones(400) * 100.0
+    volumes[-5:] = 50.0                # vol_ratio = 0.5 < 0.8
+
+    hist = pd.DataFrame({
+        'date': dates,
+        'open': prices, 'close': prices,
+        'high': prices * 1.005, 'low': prices * 0.995,
+        'volume': volumes,
+    })
+    f = MATrendPullbackFilter(
+        volume_ratio_max=0.8,
+        proximity_min=-0.10,
+        min_slope_pct=0.0,
+        min_cross_count=0,
+    )
+    result = f._analyze_stock(hist)
+    assert result is not None
+
+
+def test_volume_filter_skipped_when_no_volume_column():
+    """hist 无 volume 列时，成交量过滤静默跳过，不报错。"""
+    dates = pd.date_range('2023-01-01', periods=400, freq='B')
+    base = np.linspace(8.0, 12.0, 400)
+    cross_zone = np.sin(np.linspace(0, 3 * np.pi, 61)) * 0.5
+    prices = base.copy()
+    prices[-61:] = base[-61:] + cross_zone
+    ma120_approx = np.mean(prices[-120:])
+    prices[-1] = ma120_approx * 0.98
+
+    hist = pd.DataFrame({
+        'date': dates,
+        'open': prices, 'close': prices,
+        'high': prices * 1.005, 'low': prices * 0.995,
+        # 故意不包含 volume 列
+    })
+    f = MATrendPullbackFilter(
+        volume_ratio_max=0.8,
+        proximity_min=-0.10,
+        min_slope_pct=0.0,
+        min_cross_count=0,
+    )
+    result = f._analyze_stock(hist)
+    assert result is not None  # 无 volume 列时不过滤
