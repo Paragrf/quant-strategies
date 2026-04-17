@@ -1,14 +1,14 @@
 # run_backtest.py
 """
-快速回测脚本：对每只股票历史数据滚动回放，统计 MATrendPullbackFilter 信号的
-固定持有 N 日收益表现。
+动态退出回测脚本：对每只股票历史数据滚动回放，统计 MATrendPullbackFilter 信号的
+动态三条件退出（收复均线/止损/到期强平）收益表现。
 
 用法：
-    python run_backtest.py [--hold_days N] [--volume_filter on|off] [--proximity_min F]
+    python3 run_backtest.py [--max_hold_days N] [--stop_loss F] [--volume_filter on|off] [--proximity_min F]
 
 示例：
-    python run_backtest.py --hold_days 10
-    python run_backtest.py --hold_days 20 --volume_filter off
+    python3 run_backtest.py
+    python3 run_backtest.py --max_hold_days 20 --stop_loss -0.03
 """
 
 import argparse
