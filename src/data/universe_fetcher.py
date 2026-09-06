@@ -113,10 +113,11 @@ def _fetch_csi300_raw() -> List[Dict]:
     df = _retry(ak.index_stock_cons, symbol='000300')
     code_col = _pick_col(df, '品种代码', '成分券代码', '股票代码')
     name_col = _pick_col(df, '品种名称', '成分券名称', '股票名称')
-    return [
-        {'code': str(row[code_col]).zfill(6), 'name': str(row[name_col])}
-        for _, row in df.iterrows()
-    ]
+    stocks = {}
+    for _, row in df.iterrows():
+        code = str(row[code_col]).zfill(6)
+        stocks[code] = {'code': code, 'name': str(row[name_col])}
+    return list(stocks.values())
 
 
 def get_csi300(cache: StockCache) -> List[Dict]:

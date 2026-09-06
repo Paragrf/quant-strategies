@@ -80,6 +80,22 @@ Scans the A-share universe for Jesse Livermore-style breakout signals.
 
 ---
 
+### 5. Bottom Right-Side Start (`run_bottom_right_side.py`)
+
+Scans the full A-share universe for stocks that have spent time forming a relatively narrow base after a substantial drawdown and have only just started moving up.
+
+**Default conditions:**
+- The prior 60 trading days have a range no wider than 35%, with at least 18 days near the base low
+- The base low is at least 20% below the preceding 120-day reference high
+- The latest 2-day return is between 0.2% and 8%, while the preceding 10-day return is no more than 5%
+- MA5 has turned upward, price is above MA5, and price has just broken the recent 5-day high
+- Price is no more than 3% above the base high, avoiding already extended moves
+- The latest 2-day volume is at least 0.8× the base-period average, so the first small-up day is not rejected just because volume has not expanded yet
+
+**Scoring:** base quality + short-term turn + early-move strength + volume expansion, max 100
+
+---
+
 ## Project Structure
 
 ```
@@ -89,7 +105,8 @@ quant_strategies/
 │   │   ├── dividend_filter.py             # Dividend dip logic
 │   │   ├── ma_reversal_filter.py          # MA reversal logic
 │   │   ├── ma_trend_pullback_filter.py    # MA trend pullback logic
-│   │   └── livermore_filter.py            # Livermore breakout logic
+│   │   ├── livermore_filter.py             # Livermore breakout logic
+│   │   └── bottom_right_side_filter.py     # Bottom right-side start logic
 │   └── data/
 │       ├── fetcher.py              # Async stock data fetcher
 │       ├── universe_fetcher.py     # A-share / CSI300 universe loader
@@ -107,7 +124,8 @@ quant_strategies/
 ├── run_dividend_dip.py              # Entry point: Dividend dip scan
 ├── run_ma_reversal.py               # Entry point: MA reversal scan
 ├── run_ma_trend_pullback.py         # Entry point: MA trend pullback scan
-└── run_livermore.py                 # Entry point: Livermore scan
+├── run_livermore.py                 # Entry point: Livermore scan
+└── run_bottom_right_side.py         # Entry point: Bottom right-side start scan
 ```
 
 ---
@@ -147,6 +165,9 @@ python run_ma_trend_pullback.py
 
 # Livermore breakout scan (full A-share universe)
 python run_livermore.py
+
+# Bottom right-side start scan (full A-share universe)
+python run_bottom_right_side.py
 ```
 
 Each script prints a formatted results table to stdout and saves results to SQLite.

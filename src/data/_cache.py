@@ -115,6 +115,25 @@ CREATE TABLE IF NOT EXISTS ma_trend_pullback_results (
     proximity_pct  REAL    NOT NULL DEFAULT 0,
     UNIQUE (scan_date, code)
 );
+-- 底部右侧启动策略扫描结果
+CREATE TABLE IF NOT EXISTS bottom_right_side_results (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    scan_date           TEXT    NOT NULL,
+    code                TEXT    NOT NULL,
+    name                TEXT    NOT NULL DEFAULT '',
+    signal_score        REAL    NOT NULL,
+    base_range_pct      REAL    NOT NULL DEFAULT 0,
+    bottom_days         INTEGER NOT NULL DEFAULT 0,
+    drawdown_pct        REAL    NOT NULL DEFAULT 0,
+    ma_spread_pct       REAL    NOT NULL DEFAULT 0,
+    ma_short_slope_pct  REAL    NOT NULL DEFAULT 0,
+    breakout_pct        REAL    NOT NULL DEFAULT 0,
+    return_2d_pct       REAL    NOT NULL DEFAULT 0,
+    pre_return_10d_pct  REAL    NOT NULL DEFAULT 0,
+    local_breakout_pct  REAL    NOT NULL DEFAULT 0,
+    volume_ratio        REAL    NOT NULL DEFAULT 0,
+    UNIQUE (scan_date, code)
+);
 """
 
 import json
@@ -126,6 +145,24 @@ class StockCache:
         os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
         with self._conn() as conn:
             conn.executescript(_DDL)
+            # 为旧版本已创建的结果表补充早期启动策略字段。
+            columns = {
+                row['name']
+                for row in conn.execute(
+                    'PRAGMA table_info(bottom_right_side_results)'
+                ).fetchall()
+            }
+            for column in (
+                'ma_short_slope_pct',
+                'return_2d_pct',
+                'pre_return_10d_pct',
+                'local_breakout_pct',
+            ):
+                if column not in columns:
+                    conn.execute(
+                        f'ALTER TABLE bottom_right_side_results '
+                        f'ADD COLUMN {column} REAL NOT NULL DEFAULT 0'
+                    )
 
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path)
@@ -222,11 +259,16 @@ class StockCache:
         data_source: str = '',
     ) -> None:
         """原子替换整个股票池，同时更新元数据。"""
+        # 外部成分股接口偶尔会返回重复代码；股票池主键要求每个代码唯一。
+        unique_stocks = {}
+        for stock in stocks:
+            unique_stocks[stock['code']] = stock
         with self._conn() as conn:
             conn.execute('DELETE FROM universe_stocks WHERE list_key = ?', (key,))
             conn.executemany(
                 'INSERT INTO universe_stocks (list_key, code, name) VALUES (?, ?, ?)',
-                [(key, s['code'], s.get('name', '')) for s in stocks],
+                [(key, code, stock.get('name', ''))
+                 for code, stock in unique_stocks.items()],
             )
             conn.execute(
                 '''INSERT OR REPLACE INTO universe_meta (list_key, update_date, data_source, updated_at)
@@ -389,6 +431,37 @@ class StockCache:
                         s.get('drawdown_pct', 0),
                         s.get('vol_ratio', 0),
                         s.get('vol_narrow_ratio', 0),
+                    )
+                    for s in signals
+                ],
+            )
+        return len(signals)
+
+    def save_bottom_right_side_results(self, signals: List[Dict], scan_date: str) -> int:
+        """保存底部右侧启动扫描结果，同一天同一股票重复扫描则覆盖。"""
+        with self._conn() as conn:
+            conn.executemany(
+                '''INSERT OR REPLACE INTO bottom_right_side_results
+                   (scan_date, code, name, signal_score, base_range_pct,
+                    bottom_days, drawdown_pct, ma_spread_pct, ma_short_slope_pct,
+                    breakout_pct, return_2d_pct, pre_return_10d_pct,
+                    local_breakout_pct, volume_ratio)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                [
+                    (
+                        scan_date,
+                        s['code'], s.get('name', ''),
+                        s['signal_score'],
+                        s.get('base_range_pct', 0),
+                        s.get('bottom_days', 0),
+                        s.get('drawdown_pct', 0),
+                        s.get('ma_spread_pct', 0),
+                        s.get('ma_short_slope_pct', 0),
+                        s.get('breakout_pct', 0),
+                        s.get('return_2d_pct', 0),
+                        s.get('pre_return_10d_pct', 0),
+                        s.get('local_breakout_pct', 0),
+                        s.get('volume_ratio', 0),
                     )
                     for s in signals
                 ],
