@@ -82,7 +82,7 @@ Scans the A-share universe for Jesse Livermore-style breakout signals.
 
 ### 5. Bottom Right-Side Start (`run_bottom_right_side.py`)
 
-Scans the full A-share universe for stocks that have spent time forming a relatively narrow base after a substantial drawdown and have only just started moving up.
+Scans CSI 300 constituents for stocks that have spent time forming a relatively narrow base after a substantial drawdown and have only just started moving up.
 
 **Default conditions:**
 - The prior 60 trading days have a range no wider than 35%, with at least 18 days near the base low
@@ -166,7 +166,7 @@ python run_ma_trend_pullback.py
 # Livermore breakout scan (full A-share universe)
 python run_livermore.py
 
-# Bottom right-side start scan (full A-share universe)
+# Bottom right-side start scan (CSI 300)
 python run_bottom_right_side.py
 ```
 

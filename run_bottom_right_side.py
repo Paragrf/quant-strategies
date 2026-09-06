@@ -7,15 +7,15 @@ import unicodedata
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s', stream=sys.stdout)
 
 from src.data._cache import StockCache
-from src.data.universe_fetcher import get_a_share
+from src.data.universe_fetcher import get_csi300
 from src.analysis.bottom_right_side_filter import BottomRightSideFilter
 
 
 _cache = StockCache()
-stocks = get_a_share(_cache)
+stocks = get_csi300(_cache)
 
 if not stocks:
-    print('A股股票池获取失败（akshare 不可用且缓存为空）')
+    print('沪深300成分股获取失败（akshare 不可用且缓存为空）')
     sys.exit(1)
 
 print(f'股票池: 共 {len(stocks)} 只')
